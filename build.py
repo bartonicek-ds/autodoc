@@ -12,8 +12,7 @@ PyInstaller.__main__.run(
         "--noconfirm",
         # PyInstaller generates a .spec file; keep it with the other build files
         "--specpath=build",
-        # python-docx's default document parts, and docx2pdf's convert.jxa (used on macOS)
+        # python-docx's default document parts
         "--collect-data=docx",
-        "--collect-data=docx2pdf",
     ]
 )

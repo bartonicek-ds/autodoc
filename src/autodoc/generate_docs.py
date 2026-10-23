@@ -99,62 +99,107 @@ def slugify(value: Any) -> str:
 
 def convert_to_pdf(docx_paths: list[Path], output_dir: Path) -> None:
     # Remove PDFs from earlier runs, so a failed conversion isn't mistaken for success
-    pdf_paths = [output_dir / path.with_suffix(".pdf").name for path in docx_paths]
-    for pdf_path in pdf_paths:
-        pdf_path.unlink(missing_ok=True)
+    for docx_path in docx_paths:
+        pdf_path_for(docx_path, output_dir).unlink(missing_ok=True)
 
-    # docx2pdf drives Microsoft Word, which only exists on macOS and Windows
-    has_word = sys.platform in ("win32", "darwin")
-    convert_fn = convert_with_word if has_word else convert_with_libreoffice
-    details = convert_fn(docx_paths, output_dir)
-    if details is None:
+    # Use Microsoft Word where it exists (macOS, Windows), LibreOffice elsewhere
+    if sys.platform == "darwin":
+        convert_fn = convert_with_word_on_mac
+    elif sys.platform == "win32":
+        convert_fn = convert_with_word_on_windows
+    else:
+        convert_fn = convert_with_libreoffice
+
+    errors = convert_fn(docx_paths, output_dir)
+    if errors is None:
         return
 
-    for docx_path, pdf_path in zip(docx_paths, pdf_paths):
+    for docx_path in docx_paths:
+        pdf_path = pdf_path_for(docx_path, output_dir)
         if pdf_path.is_file():
             logger.info("converted %s -> %s", docx_path, pdf_path)
         else:
-            reason = details or "unknown error"
-            logger.error("failed to convert %s to PDF: %s", docx_path, reason)
+            reason = errors.get(docx_path) or "unknown error"
+            logger.error("failed to convert %s to PDF: %s", docx_path.name, reason)
 
 
-# The converters return None if they skipped the conversion, otherwise details to show
-# for any file that didn't convert ("" if there are none)
+def pdf_path_for(docx_path: Path, output_dir: Path) -> Path:
+    return output_dir / docx_path.with_suffix(".pdf").name
 
 
-def convert_with_word(docx_paths: list[Path], output_dir: Path) -> str | None:
-    """Convert with Microsoft Word, via docx2pdf on Windows and its script on macOS."""
-    errors = []
+# Converters return None if skipped, else errors for the files that failed
+ConversionErrors = dict[Path, str]
+
+
+# Saves a .docx as PDF with Word. Unlike docx2pdf's script, needs no System Events access
+WORD_TO_PDF_SCRIPT = """
+function run(argv) {
+  const [docxPath, pdfPath] = argv;
+  const word = Application("Microsoft Word");
+  word.open(Path(docxPath));
+  const doc = word.activeDocument;
+  doc.saveAs({ fileName: pdfPath, fileFormat: "format PDF" });
+  doc.close({ saving: "no" });
+}
+"""
+OSASCRIPT = ["/usr/bin/osascript", "-l", "JavaScript", "-e"]
+# Error -1743: macOS didn't allow controlling another app
+MAC_PERMISSION_ERROR = "-1743"
+MAC_PERMISSION_HINT = (
+    " (macOS blocked access to Word: in System Settings > Privacy & Security > "
+    "Automation, allow Terminal to control Microsoft Word)"
+)
+
+
+def convert_with_word_on_mac(
+    docx_paths: list[Path], output_dir: Path
+) -> ConversionErrors:
+    errors = {}
     for docx_path in docx_paths:
-        pdf_path = output_dir / docx_path.with_suffix(".pdf").name
+        pdf_path = pdf_path_for(docx_path, output_dir)
+        error = run_word_script(docx_path, pdf_path)
+        if error is not None:
+            errors[docx_path] = error
+    return errors
+
+
+def run_word_script(docx_path: Path, pdf_path: Path) -> str | None:
+    """Returns an error message, or None if the conversion worked."""
+    command = [*OSASCRIPT, WORD_TO_PDF_SCRIPT, str(docx_path), str(pdf_path)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+    except OSError as e:
+        return str(e)
+
+    if result.returncode == 0:
+        return None
+
+    exit_message = f"osascript exited with code {result.returncode}"
+    message = result.stderr.strip() or exit_message
+    if MAC_PERMISSION_ERROR in message:
+        message += MAC_PERMISSION_HINT
+    return message
+
+
+def convert_with_word_on_windows(
+    docx_paths: list[Path], output_dir: Path
+) -> ConversionErrors:
+    errors = {}
+    for docx_path in docx_paths:
+        pdf_path = pdf_path_for(docx_path, output_dir)
         try:
-            if sys.platform == "darwin":
-                convert_with_word_on_mac(docx_path, pdf_path)
-            else:
-                # keep_active leaves Word open, so it isn't restarted for every file
-                docx2pdf.convert(str(docx_path), str(pdf_path), keep_active=True)
+            # keep_active leaves Word open, so it isn't restarted for every file
+            docx2pdf.convert(str(docx_path), str(pdf_path), keep_active=True)
         # docx2pdf raises various error types when Word is missing or fails
         except Exception as e:  # noqa: BLE001
-            errors.append(f"{docx_path.name}: {e}")
-    return "; ".join(errors)
+            errors[docx_path] = str(e)
+    return errors
 
 
-def convert_with_word_on_mac(docx_path: Path, pdf_path: Path) -> None:
-    """Run docx2pdf's Word script directly, because docx2pdf itself hides its errors
-    on macOS (it ignores osascript's error output and exit code)."""
-    script = Path(docx2pdf.__file__).parent / "convert.jxa"
-    # The last argument is keep_active: leave Word open for the next file
-    script_args = [str(script), str(docx_path), str(pdf_path), "true"]
-    command = ["/usr/bin/osascript", "-l", "JavaScript", *script_args]
-
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        output = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(output or f"osascript exited with code {result.returncode}")
-
-
-def convert_with_libreoffice(docx_paths: list[Path], output_dir: Path) -> str | None:
-    """Convert with LibreOffice, all files in one call since it's slow to start."""
+def convert_with_libreoffice(
+    docx_paths: list[Path], output_dir: Path
+) -> ConversionErrors | None:
+    """Convert all files in one call, since LibreOffice is slow to start."""
     office = shutil.which("soffice") or shutil.which("libreoffice")
     if office is None:
         logger.warning("LibreOffice not found, skipping PDF conversion")
@@ -165,4 +210,5 @@ def convert_with_libreoffice(docx_paths: list[Path], output_dir: Path) -> str | 
 
     command = [*args, *paths]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
-    return result.stderr.strip()
+    # LibreOffice doesn't say which file failed, so show its output for each
+    return {docx_path: result.stderr.strip() for docx_path in docx_paths}
