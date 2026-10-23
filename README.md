@@ -53,9 +53,9 @@ PDFs are exported with **Microsoft Word** on macOS and Windows, and with
 
 ## Using the program
 
-Download the archive for your system from the latest run of the
-[Build app](../../actions/workflows/build.yml) workflow and unpack it. You get an
-`autodoc/` folder with the program and an example `input/` folder. Then:
+Download the archive for your system from the
+[latest release](../../releases/latest) and unpack it. You get an `autodoc/` folder
+with the program and an example `input/` folder. Then:
 
 1. Replace the files in `input/` with your templates and variables.
 2. Double-click the program. A window shows the progress; warnings (e.g. variables
@@ -94,6 +94,14 @@ uv run python build.py
 ```
 
 The result is in `dist/`. PyInstaller only builds for the system it runs on, so the
-GitHub Actions workflow in `.github/workflows/build.yml` builds all three and packages
-each with the example `input/` folder: run it from the Actions tab, or push a tag
-such as `v0.1.0`.
+GitHub Actions workflow in `.github/workflows/build.yml` builds all of them (macOS on
+Apple Silicon and Intel, Windows, Linux) and packages each with the example `input/`
+folder. Pushing a version tag also publishes the builds as a GitHub Release:
+
+```bash
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+Running the workflow from the Actions tab builds without publishing a release; the
+builds are then only available as artifacts on the run page (requires logging in).
