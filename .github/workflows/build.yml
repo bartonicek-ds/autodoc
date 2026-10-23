@@ -15,8 +15,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # PyInstaller builds for the processor it runs on, so Macs need two builds
           - os: macos-latest
-            artifact: autodoc-macos
+            artifact: autodoc-macos-apple-silicon
+          - os: macos-15-intel
+            artifact: autodoc-macos-intel
           - os: windows-latest
             artifact: autodoc-windows
           - os: ubuntu-latest
@@ -45,21 +48,20 @@ jobs:
       # the builds in archives that keep it
       - name: Package (macOS)
         if: runner.os == 'macOS'
-        run: ditto -c -k --keepParent package/autodoc autodoc-macos.zip
+        run: ditto -c -k --keepParent package/autodoc ${{ matrix.artifact }}.zip
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
-        run: tar -czf autodoc-linux.tar.gz -C package autodoc
+        run: tar -czf ${{ matrix.artifact }}.tar.gz -C package autodoc
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
-        run: Compress-Archive -Path package/autodoc -DestinationPath autodoc-windows.zip
+        run: Compress-Archive -Path package/autodoc -DestinationPath ${{ matrix.artifact }}.zip
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
-            autodoc-macos.zip
-            autodoc-linux.tar.gz
-            autodoc-windows.zip
+            ${{ matrix.artifact }}.zip
+            ${{ matrix.artifact }}.tar.gz
           if-no-files-found: error

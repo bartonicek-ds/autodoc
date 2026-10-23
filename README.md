@@ -64,9 +64,13 @@ Download the archive for your system from the latest run of the
 
 Keep the program and `input/` together in the same folder.
 
-**macOS:** unzip `autodoc-macos.zip`. The program isn't signed by Apple, so the first
-launch is blocked: open **System Settings → Privacy & Security** and click **Open
-Anyway**. On the first PDF export, allow Terminal to control Microsoft Word.
+**macOS:** check  → **About This Mac**: with "Chip: Apple M…" download
+`autodoc-macos-apple-silicon.zip`, with "Processor: Intel" download
+`autodoc-macos-intel.zip` (the wrong one fails with "bad CPU type in executable").
+The program isn't signed by Apple, so the first launch is blocked: open **System
+Settings → Privacy & Security** and click **Open Anyway**. Alternatively, in Terminal
+in the `autodoc` folder, run `xattr -dr com.apple.quarantine .` once. On the first
+PDF export, allow Terminal to control Microsoft Word.
 
 **Windows:** unzip `autodoc-windows.zip` and run `autodoc.exe`. SmartScreen may warn
 about an unknown publisher: click **More info → Run anyway**.
