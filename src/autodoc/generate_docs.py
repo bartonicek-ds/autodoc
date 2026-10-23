@@ -123,17 +123,34 @@ def convert_to_pdf(docx_paths: list[Path], output_dir: Path) -> None:
 
 
 def convert_with_word(docx_paths: list[Path], output_dir: Path) -> str | None:
-    """Convert with Microsoft Word via docx2pdf."""
+    """Convert with Microsoft Word, via docx2pdf on Windows and its script on macOS."""
     errors = []
     for docx_path in docx_paths:
         pdf_path = output_dir / docx_path.with_suffix(".pdf").name
         try:
-            # keep_active leaves Word open, so it isn't restarted for every file
-            docx2pdf.convert(str(docx_path), str(pdf_path), keep_active=True)
+            if sys.platform == "darwin":
+                convert_with_word_on_mac(docx_path, pdf_path)
+            else:
+                # keep_active leaves Word open, so it isn't restarted for every file
+                docx2pdf.convert(str(docx_path), str(pdf_path), keep_active=True)
         # docx2pdf raises various error types when Word is missing or fails
         except Exception as e:  # noqa: BLE001
             errors.append(f"{docx_path.name}: {e}")
     return "; ".join(errors)
+
+
+def convert_with_word_on_mac(docx_path: Path, pdf_path: Path) -> None:
+    """Run docx2pdf's Word script directly, because docx2pdf itself hides its errors
+    on macOS (it ignores osascript's error output and exit code)."""
+    script = Path(docx2pdf.__file__).parent / "convert.jxa"
+    # The last argument is keep_active: leave Word open for the next file
+    script_args = [str(script), str(docx_path), str(pdf_path), "true"]
+    command = ["/usr/bin/osascript", "-l", "JavaScript", *script_args]
+
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        output = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(output or f"osascript exited with code {result.returncode}")
 
 
 def convert_with_libreoffice(docx_paths: list[Path], output_dir: Path) -> str | None:

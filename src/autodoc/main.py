@@ -4,7 +4,13 @@ import sys
 
 from autodoc.generate_docs import generate_docs
 from autodoc.logger import log_to_file, setup_logging
-from autodoc.parse_config import Config, parse_config
+from autodoc.parse_config import (
+    Config,
+    ConfigError,
+    load_config,
+    make_output_dir,
+    parse_args,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -12,9 +18,6 @@ LOG_FILE_NAME = "logs.txt"
 
 
 def run(config: Config) -> None:
-    config.output_dir.mkdir(parents=True, exist_ok=True)
-    log_to_file(config.output_dir / LOG_FILE_NAME)
-
     logger.info("input dir:  %s", config.input_dir)
     logger.info("output dir: %s", config.output_dir)
     logger.info("vars:\n%s", json.dumps(config.vars, ensure_ascii=False, indent=2))
@@ -24,10 +27,18 @@ def run(config: Config) -> None:
 def main() -> None:
     setup_logging()
     try:
-        config = parse_config()
+        input_dir = parse_args()
+        # Start the log file before reading the input, so input problems end up in it
+        output_dir = make_output_dir(input_dir)
+        log_to_file(output_dir / LOG_FILE_NAME)
+
+        config = load_config(input_dir)
         run(config)
+    except ConfigError as e:
+        logger.error("%s", e)
+        sys.exit(1)
     except Exception:
-        # Log crashes too, so their details end up in the log file
+        # Log crashes with their details, so they end up in the log file too
         logger.exception("unexpected error")
         sys.exit(1)
     finally:

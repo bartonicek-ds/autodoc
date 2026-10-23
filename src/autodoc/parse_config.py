@@ -8,6 +8,10 @@ from typing import Any
 import openpyxl
 
 
+class ConfigError(Exception):
+    """A problem with the input the user can fix, e.g. a missing folder or Excel file."""
+
+
 @dataclass
 class Config:
     input_dir: Path
@@ -27,17 +31,30 @@ def find_vars_files(input_dir: Path) -> list[Path]:
     vars_paths = sorted(path for path in paths if not is_ignored(path))
 
     if not vars_paths:
-        raise ValueError(f"no .xlsx vars file found in {input_dir}")
+        raise ConfigError(f"no .xlsx vars file found in {input_dir}")
 
     return vars_paths
 
 
+def output_dir_for(input_dir: Path) -> Path:
+    return input_dir.resolve().parent / "output"
+
+
+def make_output_dir(input_dir: Path) -> Path:
+    output_dir = output_dir_for(input_dir)
+    if output_dir.exists() and not output_dir.is_dir():
+        raise ConfigError(f"output path is not a directory: {output_dir}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
 def load_config(input_dir: Path) -> Config:
     if not input_dir.is_dir():
-        raise ValueError(f"input directory not found: {input_dir}")
+        raise ConfigError(f"input directory not found: {input_dir}")
 
     input_dir = input_dir.resolve()
-    output_dir = input_dir.parent / "output"
+    output_dir = output_dir_for(input_dir)
 
     vars_files = find_vars_files(input_dir)
     merged: dict[str, Any] = {}
@@ -47,7 +64,7 @@ def load_config(input_dir: Path) -> Config:
         for key, value in load_vars(path).items():
             if key in merged:
                 source_name = sources[key].name
-                raise ValueError(
+                raise ConfigError(
                     f"variable {key} is defined in both {source_name} and {path.name}"
                 )
             merged[key] = value
@@ -68,7 +85,7 @@ def load_vars(path: Path) -> dict[str, Any]:
         # data_only returns the computed values of formulas instead of the formulas
         workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
     except Exception as e:  # openpyxl raises various errors on bad files
-        raise ValueError(f"cannot read Excel vars file {path}: {e}") from e
+        raise ConfigError(f"cannot read Excel vars file {path}: {e}") from e
 
     data: dict[str, Any] = {}
     rows = workbook.worksheets[0].iter_rows(max_col=2, values_only=True)
@@ -76,12 +93,12 @@ def load_vars(path: Path) -> dict[str, Any]:
         key, value = (*row, None)[:2]
         if key is None:
             if value is not None:
-                raise ValueError(f"{path}, row {row_number}: value without a name")
+                raise ConfigError(f"{path}, row {row_number}: value without a name")
             continue
 
         key = str(key).strip()
         if key in data:
-            raise ValueError(f"{path}, row {row_number}: duplicate variable {key}")
+            raise ConfigError(f"{path}, row {row_number}: duplicate variable {key}")
         data[key] = format_excel_value(value)
 
     workbook.close()
@@ -105,12 +122,8 @@ def format_excel_value(value: Any) -> str:
     return str(value)
 
 
-def validate_config(config: Config) -> None:
-    if config.output_dir.exists() and not config.output_dir.is_dir():
-        raise ValueError(f"output path is not a directory: {config.output_dir}")
-
-
-def parse_config(argv: list[str] | None = None) -> Config:
+def parse_args(argv: list[str] | None = None) -> Path:
+    """Returns the input folder from the command line."""
     parser = argparse.ArgumentParser(
         prog="autodoc",
         description=(
@@ -133,11 +146,4 @@ def parse_config(argv: list[str] | None = None) -> Config:
     )
 
     args = parser.parse_args(argv)
-
-    try:
-        config = load_config(args.input_dir)
-        validate_config(config)
-    except ValueError as e:
-        parser.error(str(e))
-
-    return config
+    return args.input_dir
