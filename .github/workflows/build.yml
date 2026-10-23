@@ -1,0 +1,65 @@
+# Builds the autodoc executable on each platform (PyInstaller can't cross-compile).
+# Run it from the Actions tab ("Run workflow"), or push a tag like v0.1.0.
+# Each build is attached to the run as a downloadable archive containing an autodoc/
+# folder with the executable and the example input/ folder.
+name: Build app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: autodoc-macos
+          - os: windows-latest
+            artifact: autodoc-windows
+          - os: ubuntu-latest
+            artifact: autodoc-linux
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Build
+        run: uv run python build.py
+
+      - name: Assemble package folder
+        shell: bash
+        run: |
+          mkdir -p package/autodoc
+          cp dist/autodoc* package/autodoc/
+          cp -r input package/autodoc/input
+
+      # Artifacts are zipped on upload, which loses the executable bit, so package
+      # the builds in archives that keep it
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent package/autodoc autodoc-macos.zip
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: tar -czf autodoc-linux.tar.gz -C package autodoc
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path package/autodoc -DestinationPath autodoc-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            autodoc-macos.zip
+            autodoc-linux.tar.gz
+            autodoc-windows.zip
+          if-no-files-found: error

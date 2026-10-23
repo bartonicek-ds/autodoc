@@ -1,0 +1,27 @@
+[project]
+name = "autodoc"
+version = "0.1.0"
+description = "A small portable executable for creating .docx files with templates"
+readme = "README.md"
+authors = [
+    { name = "Adam Bartonicek", email = "adam_bartonicek@datasentics.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "docx2pdf>=0.1.8",
+    "docxtpl>=0.20.2",
+    "jinja2>=3.1.6",
+    "openpyxl>=3.1.5",
+]
+
+[project.scripts]
+autodoc = "autodoc.main:main"
+
+[build-system]
+requires = ["uv_build>=0.11.23,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.22.3",
+]
